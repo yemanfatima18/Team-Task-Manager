@@ -1,64 +1,111 @@
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const path = require('path');
+const fs = require('fs');
 
-const db = new Database(path.join(__dirname, 'ethara.db'));
-db.pragma('journal_mode = WAL');
+// ✅ Create DB in root (Railway safe)
+const dbPath = path.join(process.cwd(), 'ethara.db');
+
+// create file if not exists
+if (!fs.existsSync(dbPath)) {
+  fs.writeFileSync(dbPath, '');
+}
+
+const db = new Database(dbPath);
+
+// ❌ DO NOT use WAL (causes Railway errors)
+// db.pragma('journal_mode = WAL');
+
 db.pragma('foreign_keys = ON');
 
+// ================= TABLES =================
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT NOT NULL,
-    email      TEXT UNIQUE NOT NULL,
-    password   TEXT NOT NULL,
-    role       TEXT NOT NULL CHECK(role IN ('Admin','Member')) DEFAULT 'Member',
-    color      TEXT DEFAULT '#2563eb',
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('Admin','Member')) DEFAULT 'Member',
+    color TEXT DEFAULT '#2563eb',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS projects (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
     description TEXT,
-    status      TEXT NOT NULL CHECK(status IN ('active','on-hold','completed')) DEFAULT 'active',
-    owner_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    status TEXT NOT NULL CHECK(status IN ('active','on-hold','completed')) DEFAULT 'active',
+    owner_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS tasks (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    title       TEXT NOT NULL,
-    status      TEXT NOT NULL CHECK(status IN ('todo','in-progress','done')) DEFAULT 'todo',
-    priority    TEXT NOT NULL CHECK(priority IN ('low','medium','high')) DEFAULT 'medium',
-    due_date    TEXT,
-    project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-    assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('todo','in-progress','done')) DEFAULT 'todo',
+    priority TEXT NOT NULL CHECK(priority IN ('low','medium','high')) DEFAULT 'medium',
+    due_date TEXT,
+    project_id INTEGER,
+    assignee_id INTEGER,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
   );
 `);
 
-// Seed only if empty
+// ================= SEED DATA =================
 const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+
 if (userCount === 0) {
   const colors = ['#2563eb','#7c3aed','#0891b2','#16a34a','#dc2626'];
-  const ins = db.prepare('INSERT INTO users (name,email,password,role,color) VALUES (?,?,?,?,?)');
 
-  const a = ins.run('Alex Admin',  'admin@ethara.com',  bcrypt.hashSync('admin123',10),  'Admin',  colors[0]);
-  const m = ins.run('Mia Member',  'member@ethara.com', bcrypt.hashSync('member123',10), 'Member', colors[1]);
+  const insUser = db.prepare(
+    'INSERT INTO users (name,email,password,role,color) VALUES (?,?,?,?,?)'
+  );
 
-  const ip = db.prepare('INSERT INTO projects (name,description,status,owner_id) VALUES (?,?,?,?)');
-  const p1 = ip.run('Website Redesign','Full redesign of the company site','active', a.lastInsertRowid);
-  const p2 = ip.run('Mobile App','iOS & Android app development','active', a.lastInsertRowid);
-  const p3 = ip.run('API Integration','Third-party API connections','on-hold', m.lastInsertRowid);
+  const admin = insUser.run(
+    'Admin User',
+    'admin@ethara.com',
+    bcrypt.hashSync('admin123', 10),
+    'Admin',
+    colors[0]
+  );
 
-  const it = db.prepare('INSERT INTO tasks (title,status,priority,due_date,project_id,assignee_id,created_by) VALUES (?,?,?,?,?,?,?)');
-  it.run('Design homepage wireframes','done',     'high',  '2026-04-25', p1.lastInsertRowid, m.lastInsertRowid, a.lastInsertRowid);
-  it.run('Setup authentication flow', 'in-progress','high','2026-05-05', p1.lastInsertRowid, a.lastInsertRowid, a.lastInsertRowid);
-  it.run('Build task list API',       'todo',      'medium','2026-05-10', p2.lastInsertRowid, a.lastInsertRowid, a.lastInsertRowid);
-  it.run('Write unit tests',          'todo',      'low',   '2026-04-20', p2.lastInsertRowid, m.lastInsertRowid, a.lastInsertRowid);
-  it.run('Deploy to Railway',         'todo',      'high',  '2026-05-15', p1.lastInsertRowid, a.lastInsertRowid, a.lastInsertRowid);
+  const member = insUser.run(
+    'Member User',
+    'member@ethara.com',
+    bcrypt.hashSync('member123', 10),
+    'Member',
+    colors[1]
+  );
+
+  const insProject = db.prepare(
+    'INSERT INTO projects (name,description,status,owner_id) VALUES (?,?,?,?)'
+  );
+
+  const p1 = insProject.run(
+    'Website Redesign',
+    'Full redesign',
+    'active',
+    admin.lastInsertRowid
+  );
+
+  const insTask = db.prepare(
+    'INSERT INTO tasks (title,status,priority,due_date,project_id,assignee_id,created_by) VALUES (?,?,?,?,?,?,?)'
+  );
+
+  insTask.run(
+    'Setup project',
+    'todo',
+    'high',
+    '2026-05-10',
+    p1.lastInsertRowid,
+    member.lastInsertRowid,
+    admin.lastInsertRowid
+  );
 }
 
 module.exports = db;
