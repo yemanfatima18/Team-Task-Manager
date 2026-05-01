@@ -2,6 +2,7 @@
   "name": "team-task-manager",
   "version": "1.0.0",
   "scripts": {
-    "start": "cd backend && npm install && node server.js"
+    "start": "node backend/server.js",
+    "postinstall": "cd backend && npm install"
   }
 }
